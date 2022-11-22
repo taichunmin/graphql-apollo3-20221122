@@ -1,0 +1,18 @@
+{
+  "name": "graphql-demo-20221122",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:taichunmin/graphql-demo-20221122.git",
+  "author": "jimmytai <jimmytai@ionexenergy.com>",
+  "license": "MIT",
+  "dependencies": {
+    "apollo-server": "^3.11.1",
+    "graphql": "^16.6.0",
+    "lodash": "^4.17.21",
+    "nodemon": "^2.0.20"
+  },
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "node index.js"
+  }
+}
