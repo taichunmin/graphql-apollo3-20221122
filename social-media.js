@@ -1,8 +1,6 @@
-// see: https://ithelp.ithome.com.tw/articles/10205426
+// see: https://ithelp.ithome.com.tw/articles/10205091
 const _ = require('lodash')
-const { ApolloServer, gql, ForbiddenError } = require('apollo-server')
-const bcrypt = require('bcrypt')
-const jwt = require('jsonwebtoken')
+const { ApolloServer, gql } = require('apollo-server')
 
 // schema
 const typeDefs = gql`
@@ -54,9 +52,6 @@ const typeDefs = gql`
     "建立時間 (ISO 格式)"
     createdAt: String
   }
-  type Token {
-    token: String!
-  }
   input UpdateMyInfoInput {
     name: String
     age: Int
@@ -72,14 +67,8 @@ const typeDefs = gql`
     addFriend(userId: ID!): User
     "新增貼文"
     addPost(input: AddPostInput!): Post
-    "刪除貼文"
-    deletePost(postId: ID!): Post
     "對貼文按讚"
     likePost(postId: ID!): Post
-    "註冊"
-    signUp(name: String, email: String!, password: String!): User
-    "登入"
-    login(email: String!, password: String!): Token
   }
 `
 
@@ -129,19 +118,9 @@ const posts = [
   }
 ]
 
-const SALT_ROUNDS = 2
-const JWT_SECRET = 'JWT_SECRET'
+const ME_ID = 1
 
 // resolver helpers
-const addUser = ({ name, email, password }) => {
-  users.push({
-    id: users.length + 1,
-    name,
-    email,
-    password,
-  })
-  return _.last(users)
-}
 const findUserById = id => _.find(users, ['id', _.toInteger(id)])
 const findUserByName = name => _.find(users, ['name', name])
 const findPostById = id => _.find(posts, ['id', _.toInteger(id)])
@@ -158,16 +137,12 @@ const addPost = ({ authorId, title, body }) => {
   return _.last(posts)
 }
 const updatePost = (postId, data) => _.assign(findPostById(postId), _.omitBy(data, _.isNil))
-const createToken = ({ id, email, name }) => jwt.sign({ id, email, name }, JWT_SECRET, { expiresIn: '1d' })
 
 // resolvers
 const resolvers = {
   Query: {
     hello: () => 'world',
-    me: (root, args, { me }) => {
-      if (!me) throw new ForbiddenError('Unauthenticated')
-      return findUserById(me.id)
-    },
+    me: () => findUserById(ME_ID),
     users: () => users,
     user: (root, { name }, context) => findUserByName(name),
     posts: () => posts,
@@ -182,127 +157,58 @@ const resolvers = {
     likeGivers: (parent, args, context) => _.filter(users, user => _.includes(parent.likeGiverIds, user.id)),
   },
   Mutation: {
-    updateMyInfo: (parent, { input }, { me }) => {
-      if (!me) throw new ForbiddenError('Unauthenticated')
-      return updateUserInfo(me.id, input)
-    },
-    addFriend: (parent, { userId }, { me: { id: meId } }) => {
-      const me = findUserById(meId)
-      if (!me) throw new ForbiddenError('Unauthenticated')
+    updateMyInfo: (parent, { input }, context) => updateUserInfo(ME_ID, input),
+    addFriend: (parent, { userId }, context) => {
+      const me = findUserById(ME_ID)
       const friend = findUserById(userId)
       me.friendIds = _.uniq([...me.friendIds, friend.id])
       friend.friendIds = _.uniq([...friend.friendIds, me.id])
       return me
     },
-    addPost: (parent, { input }, { me }) => {
-      if (!me) throw new ForbiddenError('Unauthenticated')
-      return addPost({ ...input, authorId: me.id })
-    },
-    deletePost: (parent, { postId }, { me }) => {
-      if (!me) throw new ForbiddenError('Unauthenticated')
-      const postIndex = _.findIndex(posts, ['id', _.toInteger(postId)])
-      if (postIndex < 0) throw new Error(`Post ${postId} not found`)
-      const post = posts[postIndex]
-      if (post.authorId !== me.id) throw new ForbiddenError('Only author can delete this post')
-      return posts.splice(postIndex, 1)[0]
-    },
-    likePost: (parent, { postId }, { me }) => {
+    addPost: (parent, { input }, context) => addPost({ ...input, authorId: ME_ID }),
+    likePost: (parent, { postId }, context) => {
       const post = findPostById(postId)
       if (!post) throw new Error(`Post ${postId} not found`)
-      if (_.includes(post.likeGiverIds, me.id)) {
-        _.remove(post.likeGiverIds, me.id)
+      if (_.includes(post.likeGiverIds, ME_ID)) {
+        _.remove(post.likeGiverIds, ME_ID)
       } else {
-        post.likeGiverIds.push(me.id)
+        post.likeGiverIds.push(ME_ID)
       }
       return post
-    },
-    signUp: async (root, { name, email, password }, context) => {
-      if (_.some(users, ['email', email])) throw new Error(`Email ${email} already exists`)
-      const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
-      return addUser({ name, email, password: hashedPassword })
-    },
-    login: async (root, { email, password }, context) => {
-      const user = _.find(users, ['email', email])
-      if (!user) throw new Error(`Email ${email} not found`)
-
-      const passCompare = await bcrypt.compare(password, user.password)
-      if (!passCompare) throw new Error('Wrong password')
-
-      return { token: createToken(user) }
     },
   },
 }
 
 // start server
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  context: async ({ req }) => {
-    const context = {}
-    const token = req?.headers?.['x-token']
-    if (token) {
-      try {
-        context.me = jwt.verify(token, JWT_SECRET)
-      } catch (err) {
-        throw new Error('Your session expired. Sign in again.')
-      }
-    }
-    return context
-  },
-})
+const server = new ApolloServer({ typeDefs, resolvers })
 
 server.listen().then(({ url }) => {
   console.log(`? Server ready at ${url}`)
 })
 
 /*
-mutation signup ($name: String!, $email: String!, $password: String!) {
-  signUp(name: $name, email: $email, password: $password) {
-    id
-    name
-    email
-  }
-  login(email: $email, password: $password) {
-    token
-  }
-}
-query {
-  me {
-    id
-    name
-  }
-}
-mutation ($email: String!, $password: String!) {
-  login(email: $email, password: $password) {
-    token
-  }
-}
-query {
-  me {
-    id
-    name
-  }
-}
-mutation ($updateMeInput: UpdateMyInfoInput!, $addPostInput:AddPostInput!) {
-  updateMyInfo(input: $updateMeInput) {
-    id
+mutation ($updateMeInput: UpdateMyInfoInput!, $addPostInput: AddPostInput!) {
+  updateMyInfo (input: $updateMeInput) {
     name
     age
   }
-  addPost(input: $addPostInput) {
+  addPost (input: $addPostInput) {
+    id
+    title
+    body
+  }
+  likePost (postId: 3) {
     id
     title
     body
     author {
       name
     }
-    createdAt
+    likeGivers {
+      id
+      name
+      age
+    }
   }
-  likePost(postId: 1) {
-    id
-  }
-}
-mutation {
-  deletePost(postId: 2)
 }
 */
