@@ -1,8 +1,8 @@
 {
-  "name": "graphql-demo-20221122",
+  "name": "graphql-apollo3-20221122",
   "version": "1.0.0",
   "main": "index.js",
-  "repository": "git@github.com:taichunmin/graphql-demo-20221122.git",
+  "repository": "git@github.com:taichunmin/graphql-apollo3-20221122.git",
   "author": "jimmytai <jimmytai@ionexenergy.com>",
   "license": "MIT",
   "dependencies": {
